@@ -1,12 +1,20 @@
 ---
 status: proposed
-date: 2026-10-27
+date: 2026-10-31
 decision-makers: [Rahul Krishna]
 consulted: [George Safta]
 informed: []
 ---
 
 # 10: Application identity namespaces
+
+## Implementation status (2026-10-31)
+
+The namespace identity and scoped SDK-resolution portion of this decision is implemented and released. Python and TypeScript/JavaScript analyzers **1.7.0**, Java **3.4.0**, Go **0.3.0**, and **CLDK 2.1.0** use the two-segment application root. [SDK PR #440](https://github.com/codellm-devkit/python-sdk/pull/440) is merged; namespace configuration, canonical module identities, scoped URI resolution and reconstruction are complete. See [RFC-codeanalyzer-10](../rfc/10-application-identity-namespaces.md) and its [release record](../rfc/assets/10-namespace-releases.md).
+
+The released packages were verified against all 11 supported Online Boutique services in one Neo4j database, including the currency/payment wrong-service regression. A downstream scanner adaptation also implements explicit namespace/project configuration, canonical URI handling and ownership-safe graph joins, with separate scanner and Neo4j tests. Its external event producer/UI wiring, other consumers' SDK adoption, and production deployment remain separate work; completed SDK support must not be confused with those adoption tasks.
+
+The overall ADR retains `proposed` status for the broader work: package-release/occurrence modeling, semantic suffix redesign, producer-contribution lifecycle and explicit paginated namespace-wide search. Those features are not claimed by the released first iteration.
 
 ## Context
 
@@ -18,11 +26,11 @@ This identity must remain intact through call-graph, data-flow, and taint analys
 
 The namespace identifies the overall microservice application, such as `online-boutique`. Each service keeps its own `application_name`. A monolith uses the same two fields with the defaults described below.
 
-The current analyzers identify each analyzed project or service with `--app-name`, or the input directory name by default. The SDK selects it with `application_name`. Neither interface has a separate field for the overall application's identity.
+Before this change, the analyzers identified each analyzed project or service with `--app-name`, or the input directory name by default. The SDK selected it with `application_name`. Neither interface had a separate field for the overall application's identity.
 
 The namespace supplies that shared identity without replacing the individual service names. It also gives callers one explicit scope for discovery across related services.
 
-Distinct service names already produce distinct module URIs today:
+Distinct service names already produced distinct legacy module URIs:
 
 ```text
 can://emailservice/python/foo.py
@@ -31,14 +39,14 @@ can://recommendationservice/python/foo.py
 
 Those IDs distinguish the services, but do not carry their shared `online-boutique` identity. Keeping only `foo.py` during lookup also discards the service identity they already contain.
 
-For example, both SDK instances can hold the local key `foo.py`. The current shared path resolver produces these results:
+For example, both SDK instances can hold the local key `foo.py`. The pre-fix shared path resolver produced these results:
 
-| Selected SDK application | Input path | Known module keys | Current resolved key |
+| Selected SDK application | Input path | Known module keys | Legacy resolved key |
 |---|---|---|---|
 | `emailservice` | `emailservice/foo.py` | `["foo.py"]` | `foo.py` |
 | `recommendationservice` | `emailservice/foo.py` | `["foo.py"]` | `foo.py` |
 
-The resolver accepts the known key at the end of the path. It normalizes paths inside an already selected application. It does not select a service or prove that the selected service owns the supplied path.
+The old resolver accepted the known key at the end of the path. It normalized paths inside an already selected application without proving ownership. CLDK 2.1.0 enforces the selected namespace/application binding and rejects conflicting URI scope before local normalization.
 
 **The following indexing and lookup antipatterns must be avoided:**
 
@@ -82,7 +90,7 @@ All six arrangements below are required. The examples use `foo` as the shared sy
 
 ## Decision
 
-We will add namespace as an explicit identity input to the language analyzers and the Python SDK. The URI contract applies to Python, Java, TypeScript/JavaScript, Go, and future language analyzers.
+Namespace is an explicit identity input to the language analyzers and the Python SDK. The URI contract applies to Python, Java, TypeScript/JavaScript, Go, and future language analyzers.
 
 This decision requires two protections:
 
@@ -91,18 +99,18 @@ This decision requires two protections:
 
 The code analyzers produce these IDs. The Python SDK, graph loaders, and integrations that attach findings to code consume them. Analyzers and consumers must retain the IDs through call, data-flow, and taint analysis, as well as lookup, indexing, deduplication, and graph joins.
 
-This change has immediate priority.
+The first iteration has shipped; the remaining sections also describe broader follow-up requirements.
 
 ### 1. Resolve namespace and application separately
 
-The analyzer CLI will accept an optional `--namespace` alongside `--app-name`.
+The released analyzer CLIs accept an optional `--namespace` alongside `--app-name`.
 
 ```text
 application_name = supplied --app-name, otherwise the project-root directory name
 namespace        = supplied --namespace, otherwise the resolved application_name
 ```
 
-The SDK will accept `namespace` separately from `application_name`. When a caller selects one application, the SDK will use the same resolution rule.
+CLDK 2.1.0 accepts `namespace` separately from `application_name`. When a caller selects one application, the SDK uses the same resolution rule.
 
 | Inputs | Resolved namespace | Resolved application |
 |---|---|---|
@@ -113,7 +121,7 @@ The SDK will accept `namespace` separately from `application_name`. When a calle
 
 Monolithic applications require no additional identity arguments. Integrations can supply one shared namespace for several service projects.
 
-For example, a Python SDK caller can select two related services with these proposed configurations:
+For example, a Python SDK caller can select two related services with these supported configurations:
 
 ```python
 email = CLDK.python(
@@ -139,9 +147,9 @@ can://online-boutique/emailservice/python/foo.py
 can://online-boutique/recommendationservice/python/foo.py
 ```
 
-The `namespace` configuration field is proposed by this ADR; the current SDK does not support it yet.
+The `namespace` configuration field is supported in CLDK 2.1.0, including local analyzer configuration and Neo4j attachment.
 
-If this caller omits `namespace`, the proposed default for the email service is `can://emailservice/emailservice/python/foo.py`. It does not automatically join the `online-boutique` namespace. The caller must supply the common namespace to group these related services.
+If this caller omits `namespace`, the default for the email service is `can://emailservice/emailservice/python/foo.py`. It does not automatically join the `online-boutique` namespace. The caller must supply the common namespace to group these related services.
 
 For a monolith with project root `inventory`, omitted identity inputs produce `can://inventory/inventory/python/foo.py`. A graph attachment without a project root must supply `application_name` because no directory name is available as a default.
 
@@ -170,7 +178,7 @@ The six required arrangements do not require combining multiple repositories und
 
 ### 2. Always retain both URI segments
 
-The application root will have this form:
+The application root has this form:
 
 ```text
 can://<namespace>/<application_name>
@@ -184,9 +192,9 @@ can://foo/svc-1/python/server.py
 can://foo/svc-2/python/server.py
 ```
 
-We will not collapse equal segments. The identity grammar must not change according to whether the namespace equals the application name.
+Equal segments are not collapsed. The identity grammar must not change according to whether the namespace equals the application name.
 
-Each identity input occupies one URI segment. The RFC must define validation and encoding that prevent distinct accepted input pairs from producing the same root.
+Each identity input occupies one URI segment. RFC-codeanalyzer-10 defines the implemented validation and UTF-8 percent encoding that prevent distinct accepted input pairs from producing the same root.
 
 The language remains part of the code identity below the application root. An application can therefore contain several language views:
 
@@ -202,7 +210,7 @@ The same source revision retains the same code identity across deployment enviro
 
 ### 3. Apply the root consistently
 
-The qualified root will apply to every existing application-owned `can://` identity. This includes code, body nodes, artifacts, configuration keys, and external symbols.
+The qualified root applies to every existing application-owned `can://` identity. This includes code, body nodes, artifacts, configuration keys, and external symbols.
 
 ```text
 can://foo/svc-1/python/server.py
@@ -282,11 +290,11 @@ The RFC will specify field placement in JSON and Neo4j. Identity namespace must 
 
 ### 4. Add SDK selectors without combining their meanings
 
-The SDK will expose both selectors in its configuration and pass them through its local analyzer invocation and Neo4j readers.
+CLDK 2.1.0 exposes both selectors in its configuration and passes them through its local analyzer invocation and Neo4j readers.
 
 #### 4.1 Make the caller's application binding explicit
 
-The proposed SDK configurations in section 1 select `online-boutique/emailservice` and `online-boutique/recommendationservice` separately.
+The supported SDK configurations in section 1 select `online-boutique/emailservice` and `online-boutique/recommendationservice` separately.
 
 The `email` instance selects the application root `can://online-boutique/emailservice`. Its descendant scope is `can://online-boutique/emailservice/`.
 
@@ -357,9 +365,9 @@ The implementation must use a common identity rule for anchor lookup, prefix sco
 
 These rules govern emitted identities and consumer operations. An analyzer can use local references internally before it resolves them to canonical output identities.
 
-### 5. Allow namespace-wide search with a warning and pagination
+### 5. Follow-up: namespace-wide search with a warning and pagination
 
-An explicit namespace-wide search supplies a namespace without an application selector. It uses the namespace prefix, such as `can://foo/`, across matching applications. A language-specific SDK view retains its language selection.
+This follow-up is not implemented in CLDK 2.1.0. The proposed explicit namespace-wide search supplies a namespace without an application selector. It uses the namespace prefix, such as `can://foo/`, across matching applications. A language-specific SDK view retains its language selection.
 
 An omitted application selector in an ordinary request must not silently select this broader mode.
 
@@ -423,7 +431,7 @@ Version-qualified releases and application-owned occurrences add records and rel
 
 ## Confirmation
 
-This draft contains no implementation. The later RFC must turn the identity, scope, warning, and pagination requirements into conformance checks.
+The first-iteration identity, scope and canonical-ID checks are implemented and documented in RFC-codeanalyzer-10 with release and live Neo4j evidence. The table below also contains broader conformance targets; namespace-wide search, package occurrence modeling and producer lifecycle remain follow-up requirements.
 
 | Area | Required evidence |
 |---|---|
@@ -462,7 +470,7 @@ This draft contains no implementation. The later RFC must turn the identity, sco
 
 ## RFC follow-up
 
-After this ADR iteration, the RFC will specify:
+RFC-codeanalyzer-10 specifies the delivered namespace/SDK iteration. Broader follow-up RFC work must address the remaining portions of this list:
 
 1. CLI, in-process, and SDK configuration details, including local analyzer invocation, caller binding, and SDK scope enforcement.
 2. Canonical schema fields, graph properties, ID-contract versioning, and generated identity helpers.
@@ -475,12 +483,15 @@ After this ADR iteration, the RFC will specify:
 9. Source-boundary mappings, repository/revision/root provenance, producer contributions, shared-entity lifecycle, and fixtures for all six required topologies. Specify per-producer metadata, version compatibility, availability, and aggregate completeness behavior. A failed required contribution must remain distinguishable from an empty language view. Replacement and cleanup must preserve sibling contributions and shared relationships.
 10. Canonical URI use in call, data-flow, and taint analysis, lookup, identity indexes, deduplication, and graph joins. Specify source-position ownership, integration routing, declared path aliases, and scope-conflict and ambiguity diagnostics. Include same-named modules and functions, overlapping source positions, and reversed backend order in conformance fixtures.
 
-This draft stops at the ADR. It does not start an RFC or implementation plan.
+The linked RFC and its released implementation supersede the earlier pre-implementation status. This ADR continues to record the broader architectural requirements beyond that iteration.
 
 ## References
 
-- Current CLI inputs: [Python](https://github.com/codellm-devkit/codeanalyzer-python/blob/54acde45556869271c16d5fead1134a821012811/codeanalyzer/__main__.py#L95), [Java](https://github.com/codellm-devkit/codeanalyzer-java/blob/581edfaf2bab6711927887d129767a301660e3a1/src/main/java/com/ibm/cldk/CodeAnalyzer.java#L127), and [TypeScript](https://github.com/codellm-devkit/codeanalyzer-typescript/blob/beb34433b97dd7634941bbb6592f65665eece6e9/src/cli.ts#L19).
-- Current SDK [connection configuration](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/commons/backend_config.py#L94) and [Python identity scope](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/python/neo4j/neo4j_backend.py#L479).
-- Current SDK [application-local path normalization](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/commons/keys.py#L34) and [TypeScript module lookup](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/typescript/neo4j/neo4j_backend.py#L1389).
-- Current SDK [dependency reconstruction and locked-version loss](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/commons/artifacts.py#L82).
+- Delivered [RFC-codeanalyzer-10](../rfc/10-application-identity-namespaces.md) and [stable release verification](../rfc/assets/10-namespace-releases.md).
+- The pinned source links below record the historical baseline used to motivate this decision. They do not describe the current namespace-aware SDK.
+
+- Baseline CLI inputs: [Python](https://github.com/codellm-devkit/codeanalyzer-python/blob/54acde45556869271c16d5fead1134a821012811/codeanalyzer/__main__.py#L95), [Java](https://github.com/codellm-devkit/codeanalyzer-java/blob/581edfaf2bab6711927887d129767a301660e3a1/src/main/java/com/ibm/cldk/CodeAnalyzer.java#L127), and [TypeScript](https://github.com/codellm-devkit/codeanalyzer-typescript/blob/beb34433b97dd7634941bbb6592f65665eece6e9/src/cli.ts#L19).
+- Baseline SDK [connection configuration](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/commons/backend_config.py#L94) and [Python identity scope](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/python/neo4j/neo4j_backend.py#L479).
+- Baseline SDK [application-local path normalization](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/commons/keys.py#L34) and [TypeScript module lookup](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/typescript/neo4j/neo4j_backend.py#L1389).
+- Baseline SDK [dependency reconstruction and locked-version loss](https://github.com/codellm-devkit/python-sdk/blob/c125d486a0cf5f5d80a0e4b7fdeb2913c0a24d45/cldk/analysis/commons/artifacts.py#L82).
 - [ECMA-427: Package-URL specification, first edition](https://ecma-international.org/publications-and-standards/standards/ecma-427/).

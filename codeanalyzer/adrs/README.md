@@ -13,7 +13,7 @@ Diagrams and other assets go under `assets/`, named after the ADR they belong to
 
 | # | Title | Status |
 |---|-------|--------|
-| [10](10-application-identity-namespaces.md) | Application identity namespaces | proposed (draft) |
+| [10](10-application-identity-namespaces.md) | Application identity namespaces | proposed (first iteration implemented; broader follow-ups remain) |
 | [20](20-shared-core-with-thin-language-backends.md) | A shared Rust core with thin language backends | proposed |
 | [21](21-facts-ir.md) | The facts IR between language backends and the core | proposed (draft) |
 | [30](30-external-library-model.md) | External Library Model (ELM) | proposed (draft) |
